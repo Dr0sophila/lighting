@@ -179,7 +179,7 @@ def train_autoencoder(train_data_path, val_data_path, model_save_path, input_dim
 
 def main():
     # 设置路径
-    data_dir = './data'
+    data_dir = '../data'
     split_data_dir = './split_data'
     models_dir = './models'
     os.makedirs(models_dir, exist_ok=True)

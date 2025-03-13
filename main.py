@@ -1,16 +1,6 @@
-# This is a sample Python script.
+import autoencoder
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+if __name__ == "__main__":
+    # autoencoder.vis_ae(data="./data/towerid_waves_map.pkl", enc_dim=16)
+    # autoencoder.vis_2d_ae(data="./data/augment.pkl")
+    autoencoder.single_data_test(data_path="./data/towerid_waves_map.pkl", zero_path="./data/zero.npy", enc_dim=16)
