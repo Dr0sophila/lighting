@@ -63,9 +63,11 @@ class WaveAutoencoder(nn.Module):
                 if layer.bias is not None:
                     nn.init.zeros_(layer.bias)
 
-    def evaluate_pearson(self, np_data):
+    import numpy as np
+
+    def evaluate_pearson_batch(self, np_data):
         """
-        Compute Pearson Correlation Coefficient (PCC) for wave data.
+        Compute Pearson Correlation Coefficient (PCC) for a batch of wave data efficiently.
         """
         self.eval()
         tensor_data = torch.tensor(np.array(np_data), dtype=torch.float32).to(self.device)
@@ -76,23 +78,27 @@ class WaveAutoencoder(nn.Module):
         original_np = tensor_data.cpu().numpy()
         reconstructed_np = reconstructed.cpu().numpy()
 
-        pcc_values = []
-        for i in range(original_np.shape[0]):
-            if np.all(original_np[i] == original_np[i][0]) or np.all(reconstructed_np[i] == reconstructed_np[i][0]):
-                pcc_values.append(0.0)  # Replace NaN with 0.0 (neutral correlation)
-            else:
-                pcc = pearsonr(original_np[i], reconstructed_np[i])[0]
-                if np.isnan(pcc):  # Catch any NaN cases
-                    pcc = 0.0
-                pcc_values.append(pcc)
+        # Compute Pearson correlation for all rows at once using NumPy
+        mean_orig = np.mean(original_np, axis=1, keepdims=True)
+        mean_recon = np.mean(reconstructed_np, axis=1, keepdims=True)
 
-        return np.mean(pcc_values) if len(pcc_values) > 0 else 0.0  # Return 0.0 if empty
+        numerator = np.sum((original_np - mean_orig) * (reconstructed_np - mean_recon), axis=1)
+        denominator = np.sqrt(
+            np.sum((original_np - mean_orig) ** 2, axis=1) * np.sum((reconstructed_np - mean_recon) ** 2, axis=1)
+        )
+
+        # Handle division by zero by setting small denominators to a safe value
+        denominator = np.where(denominator < 1e-8, 1e-8, denominator)
+        pcc_values = numerator / denominator
+
+        # Ensure no NaNs (replace with 0.0 if needed)
+        return np.nan_to_num(pcc_values, nan=0.0)
 
     def train_model(self, np_data, zero_data, batch_size=10, epochs=20):
         """
-        Train the autoencoder and calculate AUC per epoch.
+        Train the autoencoder and calculate AUC per epoch efficiently.
         """
-        tensor_data = torch.tensor(np_data, dtype=torch.float32).to(self.device)
+        tensor_data = torch.tensor(np.array(np_data), dtype=torch.float32).to(self.device)
 
         # Create DataLoader
         dataset = TensorDataset(tensor_data)
@@ -100,6 +106,9 @@ class WaveAutoencoder(nn.Module):
 
         # AUC tracking
         auc_per_epoch = []
+
+        # Convert zero_data once to avoid repeated conversions
+        zero_data = np.array(zero_data)
 
         # Training loop
         for epoch in range(epochs):
@@ -118,12 +127,9 @@ class WaveAutoencoder(nn.Module):
             avg_loss = total_loss / len(data_loader)
             # print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.6f}")
 
-            # Evaluate Pearson correlation
-            real_pccs = np.array([self.evaluate_pearson([wave]) for wave in np_data])
-
-            # Sample 100 random negative examples
-
-            zero_pccs = np.array([self.evaluate_pearson([wave]) for wave in zero_data])
+            # Evaluate Pearson correlation in batches
+            real_pccs = self.evaluate_pearson_batch(np_data)
+            zero_pccs = self.evaluate_pearson_batch(zero_data)
 
             # Labels: 1 for real data, 0 for zero data
             y_true = np.concatenate([np.ones_like(real_pccs), np.zeros_like(zero_pccs)])
@@ -135,7 +141,6 @@ class WaveAutoencoder(nn.Module):
             print(f"Epoch [{epoch + 1}/{epochs}] - AUC: {auc:.6f}")
 
         return auc_per_epoch
-
 
 def single_data_test(data_path, zero_path, enc_dim=2, batch_size=10, epochs=20):
     with open(data_path, "rb") as f:
