@@ -1,13 +1,10 @@
 import pickle
-import numpy as np
-import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from scipy.stats import pearsonr
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -63,8 +60,6 @@ class WaveAutoencoder(nn.Module):
                 if layer.bias is not None:
                     nn.init.zeros_(layer.bias)
 
-    import numpy as np
-
     def evaluate_pearson_batch(self, np_data):
         """
         Compute Pearson Correlation Coefficient (PCC) for a batch of wave data efficiently.
@@ -100,6 +95,14 @@ class WaveAutoencoder(nn.Module):
         """
         tensor_data = torch.tensor(np.array(np_data), dtype=torch.float32).to(self.device)
 
+        with open("./data/towerid_waves_map.pkl", "rb") as f:
+            tower_id_waves_map = pickle.load(f)
+
+        # Load all waves (positive samples)
+        test_wave, _ = util.get_all_data(tower_id_waves_map)
+
+
+
         # Create DataLoader
         dataset = TensorDataset(tensor_data)
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -128,7 +131,7 @@ class WaveAutoencoder(nn.Module):
             # print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.6f}")
 
             # Evaluate Pearson correlation in batches
-            real_pccs = self.evaluate_pearson_batch(np_data)
+            real_pccs = self.evaluate_pearson_batch(test_wave)
             zero_pccs = self.evaluate_pearson_batch(zero_data)
 
             # Labels: 1 for real data, 0 for zero data
@@ -142,7 +145,62 @@ class WaveAutoencoder(nn.Module):
 
         return auc_per_epoch
 
-def single_data_test(data_path, zero_path, enc_dim=2, batch_size=10, epochs=20):
+
+def vis_ae(data, enc_dim=8):
+
+    autoencoder = WaveAutoencoder(encoded_dim=enc_dim)
+
+    waves = np.array(data)
+
+    zero_data_full = np.load("./data/zero.npy")
+
+    np.random.seed(42)  # reproducibility
+    indices = np.random.choice(len(zero_data_full), size=10000, replace=False)
+    zero_data_sampled = zero_data_full[indices]
+
+    autoencoder.train_model(waves, zero_data_sampled, batch_size=10, epochs=20)
+
+    with open("./data/towerid_waves_map.pkl", "rb") as f:
+        tower_id_waves_map = pickle.load(f)
+
+    waves, _ = util.get_all_data(tower_id_waves_map)
+
+    pos_rc_values = autoencoder.evaluate_pearson_batch(waves)
+
+    neg_rc_values = autoencoder.evaluate_pearson_batch(zero_data_sampled)
+
+    pos_indices = np.arange(len(pos_rc_values))
+    neg_indices = np.arange(len(pos_rc_values), len(pos_rc_values) + len(neg_rc_values))
+
+    # Plot scatter points instead of lines
+    plt.figure(figsize=(12, 6))
+    plt.ylim([0,1])
+    plt.scatter(pos_indices, pos_rc_values, label='Hit', alpha=0.7, marker='o', s=10)
+    plt.scatter(neg_indices, neg_rc_values, label='Not Hit', alpha=0.7, marker='x', s=10)
+
+    # Add title and labels
+    # plt.title('Pearson Correlation Coefficient (RC) for Positive and Negative Samples')
+    plt.xlabel('Wave Index')
+    plt.ylabel('RC')
+    plt.legend()
+    plt.grid(True)
+
+    # Show the plot
+    plt.show()
+def vis_2d_ae(data, enc_dim=2):
+    with open(data, "rb") as f:
+        tower_id_waves_map = pickle.load(f)
+
+    autoencoder = WaveAutoencoder(encoded_dim=enc_dim)
+    waves, index = util.get_all_data(tower_id_waves_map)
+    autoencoder.train_model(waves, batch_size=10, epochs=20)
+    _, data = autoencoder(torch.tensor(waves).to("cuda"))
+    util.plot_2d_data(data.cpu().detach().numpy(), index)
+
+
+
+
+def single_data_test(data_path, zero_path, enc_dim=16, batch_size=10, epochs=20):
     with open(data_path, "rb") as f:
         tower_id_waves_map = pickle.load(f)
 
@@ -167,7 +225,9 @@ def single_data_test(data_path, zero_path, enc_dim=2, batch_size=10, epochs=20):
         # Store AUC values for the current wave
         auc_matrix[i, :] = auc_per_epoch
 
-    # Plot heatmap
+    sorted_indices = np.argsort(auc_matrix[:, 0])  # Get sorting indices based on the first column
+    auc_matrix = auc_matrix[sorted_indices]
+
     fig, ax = plt.subplots(figsize=(10, 6))
     cax = ax.imshow(auc_matrix, aspect='auto', cmap='viridis', interpolation='nearest')
 
@@ -183,29 +243,7 @@ def single_data_test(data_path, zero_path, enc_dim=2, batch_size=10, epochs=20):
     ax.set_yticks(range(0, num_waves, max(1, num_waves // 10)))  # Reduce tick density if too many waves
     ax.set_yticklabels(range(1, num_waves + 1, max(1, num_waves // 10)))
 
-    ax.set_title("AUC Heatmap Over Epochs and Waves")
+    # ax.set_title("AUC Heatmap Over Epochs and Waves")
     plt.show()
 
     return auc_matrix
-
-
-def vis_ae(data, enc_dim=2):
-    with open(data, "rb") as f:
-        tower_id_waves_map = pickle.load(f)
-
-    autoencoder = WaveAutoencoder(encoded_dim=enc_dim)
-    waves, index = util.get_all_data(tower_id_waves_map)
-    autoencoder.train_model(waves, batch_size=10, epochs=20)
-    _, data = autoencoder(torch.tensor(waves).to("cuda"))
-    util.plot_cluster_tsne(data.cpu().detach().numpy(), index)
-
-
-def vis_2d_ae(data, enc_dim=2):
-    with open(data, "rb") as f:
-        tower_id_waves_map = pickle.load(f)
-
-    autoencoder = WaveAutoencoder(encoded_dim=enc_dim)
-    waves, index = util.get_all_data(tower_id_waves_map)
-    autoencoder.train_model(waves, batch_size=10, epochs=20)
-    _, data = autoencoder(torch.tensor(waves).to("cuda"))
-    util.plot_2d_data(data.cpu().detach().numpy(), index)
